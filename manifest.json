@@ -1,0 +1,102 @@
+{
+  "id": "cn.edu.swfu.academic",
+  "name": "西南林业大学",
+  "version": "1.1.1",
+  "apiVersion": 3,
+  "kind": "extension",
+  "extends": "builtin.zf",
+  "entry": "index.js",
+  "category": "school",
+  "license": "GPL-3.0-only",
+  "maintainers": [
+    {
+      "name": "SubmergeDQ"
+    }
+  ],
+  "maintenance": "active",
+  "description": "西南林业大学统一身份认证（正方定制 CAS）登录扩展：在 App 内用学号与个人门户密码登录（倒序 RSA、图片验证码）；并按学校「周次课表」接口提供准确的节次时间与开学日期。课表、成绩、考试与选课继续复用内置新正方协议。",
+  "features": [
+    "统一身份认证登录（倒序 RSA、验证码）",
+    "需要二次验证时交接学校网页",
+    "周次课表作息：12 节次真实起止时间与开学日期",
+    "学期与课表",
+    "成绩、成绩详情与考试",
+    "选课查询与选退"
+  ],
+  "capabilities": [
+    "auth.start",
+    "auth.resume",
+    "auth.refreshCaptcha",
+    "auth.validate",
+    "study.calendar"
+  ],
+  "network": [
+    {
+      "origin": "https://jw.swfu.edu.cn",
+      "pathPrefix": "/jwglxt",
+      "methods": [
+        "GET",
+        "POST"
+      ],
+      "purposes": [
+        "auth",
+        "query"
+      ]
+    },
+    {
+      "origin": "https://jw.swfu.edu.cn",
+      "pathPrefix": "/sso",
+      "methods": [
+        "GET"
+      ],
+      "purposes": [
+        "auth"
+      ]
+    },
+    {
+      "origin": "https://cas.swfu.edu.cn",
+      "pathPrefix": "/cas",
+      "methods": [
+        "GET",
+        "POST"
+      ],
+      "purposes": [
+        "auth"
+      ]
+    }
+  ],
+  "school": {
+    "id": "swfu",
+    "name": "西南林业大学",
+    "domain": "jw.swfu.edu.cn",
+    "protocol": "https",
+    "basePath": "/jwglxt",
+    "academicSystem": "zf",
+    "allowedAcademicHosts": [
+      "cas.swfu.edu.cn"
+    ]
+  },
+  "matches": [
+    {
+      "host": "jw.swfu.edu.cn",
+      "pathPrefix": "/jwglxt",
+      "protocol": "https"
+    }
+  ],
+  "serviceScope": [
+    "仅西南林业大学统一身份认证（cas.swfu.edu.cn）与正方教务（jw.swfu.edu.cn）；账号由学校平台管理，插件不保存密码或票据"
+  ],
+  "files": {},
+  "verifiedScope": [
+    "已实测真实登录链路（2026-11-13，测试账号）：CAS 接受倒序 RSA 密码后经 /sso/zfiotlogin?ticket 与 /jwglxt/ticketlogin 建立教务会话，落地 index_initMenu.html",
+    "已实测教务接口：课表 kbcx/xskbcx_cxXsKb.html 返回 16/23 条 kbList；成绩、考试查询返回标准 items 结构",
+    "已实测周次课表接口：/kbcx/xskbcxZccx_cxZcByXnxq.html 返回 20 周与每周日期（2026-2027-1 第 1 周 2026-08-31 起）；/jzgl/skxxMobile_cxRsdjc.html 返回 12 节次真实起止时间（1 节 08:20-09:05、3 节 10:25-11:10 等）",
+    "已核对个人资料页仅显示姓名（.media-heading），学号在首页 #sessionUserKey；插件据此解析并在缺少时回退登录账号",
+    "插件倒序 RSA 与学校 security.js 在同一公钥、同一密码下逐字节一致（本地执行 security.js 对拍）",
+    "离线 18 条样本覆盖账密直登、CAS 退回重试、验证码挑战/刷新/提交、账号密码错误、登录风控锁定（423）转人工登录、二次认证网页交接、网页登录后核验、身份回退、会话失效、过期续接与校历作息正常/空周次/接口异常回退",
+    "未在 Android 真机完成登录后的课表节次时间显示、学期切换、成绩/考试与选退课验收；未做学期课表与 20 个单周课表并集的完整性对比",
+    "已知限制：App 手动改过节次时间时不会采用插件作息；实践课（sjkList）不显示；调课/停课不按临时日期调整；学校风控锁定约 30 分钟自动解锁"
+  ],
+  "requires": [],
+  "repository": "https://github.com/SubmergeDQ/swfu-cas-plugin"
+}
