@@ -359,9 +359,8 @@ async function periodXqhId(s: HostSdk, xnm: string, xqm: string): Promise<string
   return '';
 }
 
-async function periodList(s: HostSdk, xnm: string, xqm: string): Promise<{number: number; start: string; end: string}[]> {
-  const xqh = await periodXqhId(s, xnm, xqm);
-  const response = await softQuery(s, periodUrl, {xnm, xqm, xqh_id: xqh});
+async function requestPeriods(s: HostSdk, xnm: string, xqm: string, xqhId: string): Promise<{number: number; start: string; end: string}[]> {
+  const response = await softQuery(s, periodUrl, {xnm, xqm, xqh_id: xqhId});
   if (!response || response.status !== 200) return [];
   let rows: unknown;
   try {
@@ -382,9 +381,41 @@ async function periodList(s: HostSdk, xnm: string, xqm: string): Promise<{number
   return periods.sort((a, b) => a.number - b.number);
 }
 
+/** 校区号默认取校本部 '1'（2026-11 实测两个账号的 kbList 均为 1）；取不到时段时才查课表接口。 */
+async function periodList(s: HostSdk, xnm: string, xqm: string): Promise<{number: number; start: string; end: string}[]> {
+  const cached = await s.state.get<string>('protocol:xqhId');
+  const first = cached || '1';
+  const direct = await requestPeriods(s, xnm, xqm, first);
+  if (direct.length) return direct;
+  const xqh = await periodXqhId(s, xnm, xqm);
+  if (xqh && xqh !== first) {
+    const resolved = await requestPeriods(s, xnm, xqm, xqh);
+    if (resolved.length) return resolved;
+  }
+  for (const candidate of ['', '1']) {
+    if (candidate === first || candidate === xqh) continue;
+    const fallback = await requestPeriods(s, xnm, xqm, candidate);
+    if (fallback.length) return fallback;
+  }
+  return [];
+}
+
+/** 学校 2026-11 实测的公开作息：接口不可用时用于兜底，避免课表退回 08:00 默认值。 */
+const fallbackPeriods = [
+  {number: 1, start: '08:20', end: '09:05'}, {number: 2, start: '09:10', end: '09:55'},
+  {number: 3, start: '10:25', end: '11:10'}, {number: 4, start: '11:15', end: '12:00'},
+  {number: 5, start: '14:00', end: '14:45'}, {number: 6, start: '14:50', end: '15:35'},
+  {number: 7, start: '16:05', end: '16:50'}, {number: 8, start: '16:55', end: '17:40'},
+  {number: 9, start: '18:30', end: '19:15'}, {number: 10, start: '19:20', end: '20:05'},
+  {number: 11, start: '20:25', end: '21:10'}, {number: 12, start: '21:15', end: '22:00'},
+];
+
 async function calendar(s: HostSdk, termId: string): Promise<Result<Calendar>> {
   const {xnm, xqm} = termOf(termId);
-  const weeks = await queryForm(s, weeksUrl, {xnm, xqm});
+  const [weeks, periods] = await Promise.all([
+    queryForm(s, weeksUrl, {xnm, xqm}),
+    periodList(s, xnm, xqm),
+  ]);
   if (weeks.status !== 200) fail('PAGE_CHANGED', '学校未返回该学期的周次信息');
   let rows: unknown;
   try {
@@ -396,8 +427,7 @@ async function calendar(s: HostSdk, termId: string): Promise<Result<Calendar>> {
   const first = (rows as Array<{zcrq?: unknown}>)[0];
   const date = typeof first?.zcrq === 'string' ? /\((\d{4}-\d{2}-\d{2})/.exec(first.zcrq)?.[1] : undefined;
   if (!date) fail('PAGE_CHANGED', '学校周次日期格式发生变化');
-  const periods = await periodList(s, xnm, xqm);
-  return ok({termId, startDate: date, periods});
+  return ok({termId, startDate: date, periods: periods.length ? periods : fallbackPeriods});
 }
 
 const plugin = {

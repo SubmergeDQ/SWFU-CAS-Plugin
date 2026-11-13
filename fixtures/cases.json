@@ -795,6 +795,18 @@
             "content-type": "application/json"
           }
         }
+      },
+      {
+        "url": "https://jw.swfu.edu.cn/jwglxt/jzgl/skxxMobile_cxRsdjc.html",
+        "purpose": "query",
+        "response": {
+          "status": 200,
+          "url": "https://jw.swfu.edu.cn/jwglxt/jzgl/skxxMobile_cxRsdjc.html",
+          "body": "[]",
+          "headers": {
+            "content-type": "application/json"
+          }
+        }
       }
     ],
     "expect": {
@@ -806,7 +818,7 @@
     }
   },
   {
-    "name": "按周次课表返回开学日期与节次时间",
+    "name": "按周次课表返回开学日期与节次时间（并行请求）",
     "operation": "study.calendar",
     "args": {
       "termId": "2026-2027-1"
@@ -819,18 +831,6 @@
           "status": 200,
           "url": "https://jw.swfu.edu.cn/jwglxt/kbcx/xskbcxZccx_cxZcByXnxq.html",
           "body": "[{\"zs\": \"1\", \"zcrq\": \"1(2026-08-31至2026-09-06)\"}, {\"zs\": \"2\", \"zcrq\": \"2(2026-09-07至2026-09-13)\"}]",
-          "headers": {
-            "content-type": "application/json"
-          }
-        }
-      },
-      {
-        "url": "https://jw.swfu.edu.cn/jwglxt/kbcx/xskbcxMobile_cxXsKb.html",
-        "purpose": "query",
-        "response": {
-          "status": 200,
-          "url": "https://jw.swfu.edu.cn/jwglxt/kbcx/xskbcxMobile_cxXsKb.html",
-          "body": "{\"kbList\": [{\"xqh_id\": \"1\"}]}",
           "headers": {
             "content-type": "application/json"
           }
@@ -875,7 +875,88 @@
     }
   },
   {
-    "name": "节次时间接口异常时保留开学日期",
+    "name": "校区号不是 1 时按课表接口解析后重试",
+    "operation": "study.calendar",
+    "args": {
+      "termId": "2027-2028-1"
+    },
+    "http": [
+      {
+        "url": "https://jw.swfu.edu.cn/jwglxt/kbcx/xskbcxZccx_cxZcByXnxq.html",
+        "purpose": "query",
+        "response": {
+          "status": 200,
+          "url": "https://jw.swfu.edu.cn/jwglxt/kbcx/xskbcxZccx_cxZcByXnxq.html",
+          "body": "[{\"zs\": \"1\", \"zcrq\": \"1(2027-08-30至2027-09-05)\"}]",
+          "headers": {
+            "content-type": "application/json"
+          }
+        }
+      },
+      {
+        "url": "https://jw.swfu.edu.cn/jwglxt/jzgl/skxxMobile_cxRsdjc.html",
+        "purpose": "query",
+        "response": {
+          "status": 200,
+          "url": "https://jw.swfu.edu.cn/jwglxt/jzgl/skxxMobile_cxRsdjc.html",
+          "body": "[]",
+          "headers": {
+            "content-type": "application/json"
+          }
+        }
+      },
+      {
+        "url": "https://jw.swfu.edu.cn/jwglxt/kbcx/xskbcxMobile_cxXsKb.html",
+        "purpose": "query",
+        "response": {
+          "status": 200,
+          "url": "https://jw.swfu.edu.cn/jwglxt/kbcx/xskbcxMobile_cxXsKb.html",
+          "body": "{\"kbList\": [{\"xqh_id\": \"2\"}]}",
+          "headers": {
+            "content-type": "application/json"
+          }
+        }
+      },
+      {
+        "url": "https://jw.swfu.edu.cn/jwglxt/jzgl/skxxMobile_cxRsdjc.html",
+        "purpose": "query",
+        "response": {
+          "status": 200,
+          "url": "https://jw.swfu.edu.cn/jwglxt/jzgl/skxxMobile_cxRsdjc.html",
+          "body": "[{\"jcmc\": \"1\", \"qssj\": \"08:20:00\", \"jssj\": \"09:05:00\"}, {\"jcmc\": \"2\", \"qssj\": \"09:10:00\", \"jssj\": \"09:55:00\"}, {\"jcmc\": \"3\", \"qssj\": \"10:25:00\", \"jssj\": \"11:10:00\"}]",
+          "headers": {
+            "content-type": "application/json"
+          }
+        }
+      }
+    ],
+    "expect": {
+      "ok": true,
+      "data": {
+        "termId": "2027-2028-1",
+        "startDate": "2027-08-30",
+        "periods": [
+          {
+            "number": 1,
+            "start": "08:20",
+            "end": "09:05"
+          },
+          {
+            "number": 2,
+            "start": "09:10",
+            "end": "09:55"
+          },
+          {
+            "number": 3,
+            "start": "10:25",
+            "end": "11:10"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "节次接口不可用时用学校公开作息兜底",
     "operation": "study.calendar",
     "args": {
       "termId": "2026-2027-2"
@@ -904,6 +985,30 @@
             "content-type": "application/json"
           }
         }
+      },
+      {
+        "url": "https://jw.swfu.edu.cn/jwglxt/kbcx/xskbcxMobile_cxXsKb.html",
+        "purpose": "query",
+        "response": {
+          "status": 500,
+          "url": "https://jw.swfu.edu.cn/jwglxt/kbcx/xskbcxMobile_cxXsKb.html",
+          "body": "error",
+          "headers": {
+            "content-type": "application/json"
+          }
+        }
+      },
+      {
+        "url": "https://jw.swfu.edu.cn/jwglxt/jzgl/skxxMobile_cxRsdjc.html",
+        "purpose": "query",
+        "response": {
+          "status": 500,
+          "url": "https://jw.swfu.edu.cn/jwglxt/jzgl/skxxMobile_cxRsdjc.html",
+          "body": "error",
+          "headers": {
+            "content-type": "application/json"
+          }
+        }
       }
     ],
     "expect": {
@@ -911,7 +1016,68 @@
       "data": {
         "termId": "2026-2027-2",
         "startDate": "2027-03-01",
-        "periods": []
+        "periods": [
+          {
+            "number": 1,
+            "start": "08:20",
+            "end": "09:05"
+          },
+          {
+            "number": 2,
+            "start": "09:10",
+            "end": "09:55"
+          },
+          {
+            "number": 3,
+            "start": "10:25",
+            "end": "11:10"
+          },
+          {
+            "number": 4,
+            "start": "11:15",
+            "end": "12:00"
+          },
+          {
+            "number": 5,
+            "start": "14:00",
+            "end": "14:45"
+          },
+          {
+            "number": 6,
+            "start": "14:50",
+            "end": "15:35"
+          },
+          {
+            "number": 7,
+            "start": "16:05",
+            "end": "16:50"
+          },
+          {
+            "number": 8,
+            "start": "16:55",
+            "end": "17:40"
+          },
+          {
+            "number": 9,
+            "start": "18:30",
+            "end": "19:15"
+          },
+          {
+            "number": 10,
+            "start": "19:20",
+            "end": "20:05"
+          },
+          {
+            "number": 11,
+            "start": "20:25",
+            "end": "21:10"
+          },
+          {
+            "number": 12,
+            "start": "21:15",
+            "end": "22:00"
+          }
+        ]
       }
     }
   }
