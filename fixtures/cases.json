@@ -8,7 +8,7 @@
     },
     "http": [
       {
-        "url": "https://jw.swfu.edu.cn/jwglxt/xtgl/login_slogin.html",
+        "url": "https://jw.swfu.edu.cn/sso/zfiotlogin",
         "purpose": "auth",
         "response": {
           "status": 200,
@@ -100,7 +100,7 @@
     },
     "http": [
       {
-        "url": "https://jw.swfu.edu.cn/jwglxt/xtgl/login_slogin.html",
+        "url": "https://jw.swfu.edu.cn/sso/zfiotlogin",
         "purpose": "auth",
         "response": {
           "status": 200,
@@ -154,7 +154,7 @@
     },
     "http": [
       {
-        "url": "https://jw.swfu.edu.cn/jwglxt/xtgl/login_slogin.html",
+        "url": "https://jw.swfu.edu.cn/sso/zfiotlogin",
         "purpose": "auth",
         "response": {
           "status": 200,
@@ -314,7 +314,7 @@
     },
     "http": [
       {
-        "url": "https://jw.swfu.edu.cn/jwglxt/xtgl/login_slogin.html",
+        "url": "https://jw.swfu.edu.cn/sso/zfiotlogin",
         "purpose": "auth",
         "response": {
           "status": 200,
@@ -381,7 +381,7 @@
     },
     "http": [
       {
-        "url": "https://jw.swfu.edu.cn/jwglxt/xtgl/login_slogin.html",
+        "url": "https://jw.swfu.edu.cn/sso/zfiotlogin",
         "purpose": "auth",
         "response": {
           "status": 200,
@@ -534,7 +534,7 @@
         "purpose": "query",
         "response": {
           "status": 200,
-          "url": "https://jw.swfu.edu.cn/jwglxt/xtgl/login_slogin.html",
+          "url": "https://jw.swfu.edu.cn/sso/zfiotlogin",
           "body": "<html><body>登录</body></html>",
           "headers": {
             "content-type": "text/html"
@@ -559,7 +559,7 @@
     },
     "http": [
       {
-        "url": "https://jw.swfu.edu.cn/jwglxt/xtgl/login_slogin.html",
+        "url": "https://jw.swfu.edu.cn/sso/zfiotlogin",
         "purpose": "auth",
         "response": {
           "status": 200,
@@ -676,7 +676,7 @@
     },
     "http": [
       {
-        "url": "https://jw.swfu.edu.cn/jwglxt/xtgl/login_slogin.html",
+        "url": "https://jw.swfu.edu.cn/sso/zfiotlogin",
         "purpose": "auth",
         "response": {
           "status": 200,

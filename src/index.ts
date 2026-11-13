@@ -16,7 +16,7 @@ import type {AcademicPlugin, AuthState, Calendar, ErrorCode, HostSdk, HttpRespon
 
 const academic = 'https://jw.swfu.edu.cn';
 const cas = 'https://cas.swfu.edu.cn/cas';
-const entry = academic + '/jwglxt/xtgl/login_slogin.html';
+const entry = academic + '/sso/zfiotlogin';
 const profile = academic + '/jwglxt/xtgl/index_cxYhxxIndex.html?gnmkdm=index';
 const completion = academic + '/jwglxt/xtgl/index_initMenu.html';
 const service = academic + '/sso/zfiotlogin';
