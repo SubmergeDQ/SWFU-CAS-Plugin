@@ -101,5 +101,5 @@
     "已知限制：App 手动改过节次时间时不采用插件作息；实践课（sjkList）不显示；调课/停课不按临时日期调整；学校风控锁定约 30 分钟自动解锁；学校关闭本地密码接口后需使用 CAS 密码（受 CAS 网络状况影响）"
   ],
   "requires": [],
-  "repository": "https://github.com/SubmergeDQ/swfu-cas-plugin"
+  "repository": "https://github.com/SubmergeDQ/SWFU-CAS-Plugin"
 }
