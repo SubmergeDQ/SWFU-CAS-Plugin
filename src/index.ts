@@ -17,6 +17,7 @@ import type {AcademicPlugin, AuthState, Calendar, ErrorCode, HostSdk, HttpRespon
 const academic = 'https://jw.swfu.edu.cn';
 const cas = 'https://cas.swfu.edu.cn/cas';
 const entry = academic + '/sso/zfiotlogin';
+const localEntry = academic + '/jwglxt/xtgl/login_slogin.html';
 const profile = academic + '/jwglxt/xtgl/index_cxYhxxIndex.html?gnmkdm=index';
 const completion = academic + '/jwglxt/xtgl/index_initMenu.html';
 const service = academic + '/sso/zfiotlogin';
@@ -270,15 +271,61 @@ async function submit(s: HostSdk, pending: Pending, retried = false): Promise<Re
   fail('PAGE_CHANGED', '学校统一认证返回了无法识别的页面，请改用网页登录');
 }
 
+
+// 学校前端已把教务登录强制 302 到统一认证，但后端本地账号密码接口仍然可用（2026-11-16 实测）。
+// 本地登录走 IPv4 的教务域名，1 次请求即可完成；统一认证入口在部分网络下会因 IPv6 不可达卡 20 秒超时。
+async function localLogin(s: HostSdk, account: string, password: string): Promise<Result<AuthState> | null> {
+  let response: HttpResponse;
+  try {
+    response = await s.http({
+      url: localEntry,
+      method: 'POST',
+      purpose: 'auth',
+      form: {yhm: account, mm: password, language: 'zh_CN'},
+    });
+  } catch {
+    return null;
+  }
+  if (response.status >= 500) return null;
+  if (isAcademicPage(response.url)) return validate(s);
+  // 密码不对或学校关闭了本地登录：交给统一认证继续（用户填的是 CAS 密码时也能走通）。
+  return null;
+}
+
+/** 学校滚动发布时 /sso/zfiotlogin 会在 302 与 404 之间抖动；入口按顺序重试。 */
+async function openUnifiedLogin(s: HostSdk): Promise<HttpResponse> {
+  const candidates = [localEntry, entry];
+  let lastError: Error | undefined;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    for (const url of candidates) {
+      let page: HttpResponse;
+      try {
+        page = await authGet(s, url);
+      } catch (error) {
+        lastError = error as Error;
+        continue;
+      }
+      if (isAcademicPage(page.url)) return page;
+      if (isCasUrl(page.url)) return page;
+      lastError = Object.assign(new Error('学校统一认证入口发生变化'), {code: 'PAGE_CHANGED' as ErrorCode});
+    }
+  }
+  throw lastError ?? Object.assign(new Error('学校统一认证入口发生变化'), {code: 'PAGE_CHANGED' as ErrorCode});
+}
+
 // ---- 登录入口 ----
 
 async function start(s: HostSdk, username: string, password: string): Promise<Result<AuthState>> {
   await s.state.remove('pending');
   const account = (username || '').trim();
   if (!account) fail('INVALID_CREDENTIALS', '请输入学号');
-  if (!password) fail('INVALID_CREDENTIALS', '请输入个人门户密码');
+  if (!password) fail('INVALID_CREDENTIALS', '请输入密码');
   await s.state.set('account', account);
-  const page = await authGet(s, entry);
+  // 1) 先尝试教务本地密码直登（IPv4、单请求，避开统一认证的 IPv6 连接超时）
+  const local = await localLogin(s, account, password);
+  if (local) return local;
+  // 2) 回退统一身份认证（CAS）
+  const page = await openUnifiedLogin(s);
   if (page.status !== 200) fail('PAGE_CHANGED', '学校教务登录入口暂不可用');
   if (isAcademicPage(page.url)) return validate(s);
   if (!isCasUrl(page.url)) fail('PAGE_CHANGED', '学校统一认证入口发生变化');
@@ -309,7 +356,6 @@ async function start(s: HostSdk, username: string, password: string): Promise<Re
   if (status.status === 200 && status.body.trim() === 'true') return captchaState(s, pending);
   return submit(s, pending);
 }
-
 
 // ---- 校历与作息（按周次课表页面的接口，修正 App 默认节次时间） ----
 
