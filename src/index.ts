@@ -274,7 +274,15 @@ async function submit(s: HostSdk, pending: Pending, retried = false): Promise<Re
 
 // 学校前端已把教务登录强制 302 到统一认证，但后端本地账号密码接口仍然可用（2026-11-16 实测）。
 // 本地登录走 IPv4 的教务域名，1 次请求即可完成；统一认证入口在部分网络下会因 IPv6 不可达卡 20 秒超时。
-async function localLogin(s: HostSdk, account: string, password: string): Promise<Result<AuthState> | null> {
+type LocalAttempt =
+  | {state: 'ok'; result: Result<AuthState>}
+  | {state: 'rejected'}
+  | {state: 'unavailable'}
+  | {state: 'network'};
+
+// 学校前端已把教务登录强制 302 到统一认证，但后端本地账号密码接口仍然可用（2026-11-16 实测）。
+// 本地登录走 IPv4 的教务域名，1 次请求即可完成；统一认证入口在部分网络下会因 IPv6 不可达卡 20 秒超时。
+async function localLogin(s: HostSdk, account: string, password: string): Promise<LocalAttempt> {
   let response: HttpResponse;
   try {
     response = await s.http({
@@ -284,15 +292,17 @@ async function localLogin(s: HostSdk, account: string, password: string): Promis
       form: {yhm: account, mm: password, language: 'zh_CN'},
     });
   } catch {
-    return null;
+    return {state: 'network'};
   }
-  if (response.status >= 500) return null;
-  if (isAcademicPage(response.url)) return validate(s);
-  // 密码不对或学校关闭了本地登录：交给统一认证继续（用户填的是 CAS 密码时也能走通）。
-  return null;
+  if (response.status >= 500) return {state: 'network'};
+  if (isAcademicPage(response.url)) return {state: 'ok', result: await validate(s)};
+  const body = response.body || '';
+  if (/用户名或密码不正确|密码错误|账号或密码不正确/.test(body)) return {state: 'rejected'};
+  // 302 到 SSO、404、或只剩本地表单：说明本地通道不可用，交给统一认证。
+  return {state: 'unavailable'};
 }
 
-/** 学校滚动发布时 /sso/zfiotlogin 会在 302 与 404 之间抖动；入口按顺序重试。 */
+/** 学校滚动发布时 /sso/zfiotlogin 在首次无 route Cookie 请求时可能 404；最多重试 3 轮入口。 */
 async function openUnifiedLogin(s: HostSdk): Promise<HttpResponse> {
   const candidates = [localEntry, entry];
   let lastError: Error | undefined;
@@ -313,18 +323,12 @@ async function openUnifiedLogin(s: HostSdk): Promise<HttpResponse> {
   throw lastError ?? Object.assign(new Error('学校统一认证入口发生变化'), {code: 'PAGE_CHANGED' as ErrorCode});
 }
 
-// ---- 登录入口 ----
+function codeOf(error: unknown): ErrorCode {
+  const code = (error as {code?: unknown})?.code;
+  return typeof code === 'string' ? code as ErrorCode : 'PAGE_CHANGED';
+}
 
-async function start(s: HostSdk, username: string, password: string): Promise<Result<AuthState>> {
-  await s.state.remove('pending');
-  const account = (username || '').trim();
-  if (!account) fail('INVALID_CREDENTIALS', '请输入学号');
-  if (!password) fail('INVALID_CREDENTIALS', '请输入密码');
-  await s.state.set('account', account);
-  // 1) 先尝试教务本地密码直登（IPv4、单请求，避开统一认证的 IPv6 连接超时）
-  const local = await localLogin(s, account, password);
-  if (local) return local;
-  // 2) 回退统一身份认证（CAS）
+async function casLogin(s: HostSdk, account: string, password: string): Promise<Result<AuthState>> {
   const page = await openUnifiedLogin(s);
   if (page.status !== 200) fail('PAGE_CHANGED', '学校教务登录入口暂不可用');
   if (isAcademicPage(page.url)) return validate(s);
@@ -355,6 +359,43 @@ async function start(s: HostSdk, username: string, password: string): Promise<Re
   const status = await authGet(s, cas + '/getKaptchaStatus');
   if (status.status === 200 && status.body.trim() === 'true') return captchaState(s, pending);
   return submit(s, pending);
+}
+
+function localHint(state: LocalAttempt['state']): string {
+  if (state === 'rejected') return '教务本地登录未通过（学校可能已关闭本地登录，或教务密码不正确）。';
+  if (state === 'network') return '教务本地登录网络异常。';
+  return '教务本地登录通道不可用（学校入口调整或网络异常）。';
+}
+
+async function start(s: HostSdk, username: string, password: string): Promise<Result<AuthState>> {
+  await s.state.remove('pending');
+  const account = (username || '').trim();
+  if (!account) fail('INVALID_CREDENTIALS', '请输入学号');
+  if (!password) fail('INVALID_CREDENTIALS', '请输入密码');
+  await s.state.set('account', account);
+  // 1) 先尝试教务本地密码直登（IPv4、单请求，避开统一认证的 IPv6 连接超时与 /sso 抖动）
+  const local = await localLogin(s, account, password);
+  if (local.state === 'ok') return local.result;
+  // 2) 本地失败后回退统一身份认证（CAS），入口最多重试 3 轮以拿到 route Cookie
+  try {
+    return await casLogin(s, account, password);
+  } catch (error) {
+    const code = codeOf(error);
+    if (code === 'WEB_LOGIN_REQUIRED') throw error; // 423 等保留原始提示
+    if (code === 'INVALID_CREDENTIALS') {
+      fail('INVALID_CREDENTIALS',
+        localHint(local.state) +
+        '统一认证（CAS）也未接受该密码。教务密码与统一认证密码可能不同：如果你刚填的是教务密码，请改用统一认证密码重试；如果填的是统一认证密码，请检查学号和密码是否输错。');
+    }
+    if (code === 'NETWORK_RETRYABLE' || code === 'TIMEOUT') {
+      fail('NETWORK_RETRYABLE',
+        localHint(local.state) +
+        '统一认证请求超时或网络异常（学校 CAS 的 IPv6 可能不可达）。请换网络后重试，或用登录页的「Cookie 登录 / 内嵌浏览器自动获取」完成登录。');
+    }
+    fail('WEB_LOGIN_REQUIRED',
+      localHint(local.state) +
+      '统一认证入口暂时不可用（学校 /sso 路由抖动，可能没拿到 route Cookie）。请稍后重试，或用登录页的「Cookie 登录 / 内嵌浏览器自动获取」完成登录。');
+  }
 }
 
 // ---- 校历与作息（按周次课表页面的接口，修正 App 默认节次时间） ----

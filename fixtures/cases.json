@@ -604,7 +604,103 @@
       "ok": false,
       "error": {
         "code": "INVALID_CREDENTIALS",
-        "message": "统一身份认证未接受学号或个人门户密码"
+        "message": "教务本地登录未通过（学校可能已关闭本地登录，或教务密码不正确）。统一认证（CAS）也未接受该密码。教务密码与统一认证密码可能不同：如果你刚填的是教务密码，请改用统一认证密码重试；如果填的是统一认证密码，请检查学号和密码是否输错。"
+      }
+    }
+  },
+  {
+    "name": "本地被拒且统一认证入口 3 轮均 404：提示稍后重试或网页登录",
+    "operation": "auth.start",
+    "args": {
+      "username": "fictional-student",
+      "password": "some-password"
+    },
+    "http": [
+      {
+        "url": "https://jw.swfu.edu.cn/jwglxt/xtgl/login_slogin.html",
+        "purpose": "auth",
+        "method": "POST",
+        "response": {
+          "status": 200,
+          "url": "https://jw.swfu.edu.cn/jwglxt/xtgl/login_slogin.html",
+          "body": "<html><body><span class=\"bottom-error-text\">用户名或密码不正确，请重新输入！</span></body></html>",
+          "headers": {
+            "content-type": "text/html"
+          }
+        }
+      },
+      {
+        "url": "https://jw.swfu.edu.cn/jwglxt/xtgl/login_slogin.html",
+        "purpose": "auth",
+        "response": {
+          "status": 404,
+          "url": "https://jw.swfu.edu.cn/sso/zfiotlogin",
+          "body": "",
+          "headers": {
+            "content-type": "text/html"
+          }
+        }
+      },
+      {
+        "url": "https://jw.swfu.edu.cn/sso/zfiotlogin",
+        "purpose": "auth",
+        "response": {
+          "status": 404,
+          "url": "https://jw.swfu.edu.cn/sso/zfiotlogin",
+          "body": "",
+          "headers": {}
+        }
+      },
+      {
+        "url": "https://jw.swfu.edu.cn/jwglxt/xtgl/login_slogin.html",
+        "purpose": "auth",
+        "response": {
+          "status": 404,
+          "url": "https://jw.swfu.edu.cn/sso/zfiotlogin",
+          "body": "",
+          "headers": {
+            "content-type": "text/html"
+          }
+        }
+      },
+      {
+        "url": "https://jw.swfu.edu.cn/sso/zfiotlogin",
+        "purpose": "auth",
+        "response": {
+          "status": 404,
+          "url": "https://jw.swfu.edu.cn/sso/zfiotlogin",
+          "body": "",
+          "headers": {}
+        }
+      },
+      {
+        "url": "https://jw.swfu.edu.cn/jwglxt/xtgl/login_slogin.html",
+        "purpose": "auth",
+        "response": {
+          "status": 404,
+          "url": "https://jw.swfu.edu.cn/sso/zfiotlogin",
+          "body": "",
+          "headers": {
+            "content-type": "text/html"
+          }
+        }
+      },
+      {
+        "url": "https://jw.swfu.edu.cn/sso/zfiotlogin",
+        "purpose": "auth",
+        "response": {
+          "status": 404,
+          "url": "https://jw.swfu.edu.cn/sso/zfiotlogin",
+          "body": "",
+          "headers": {}
+        }
+      }
+    ],
+    "expect": {
+      "ok": false,
+      "error": {
+        "code": "WEB_LOGIN_REQUIRED",
+        "message": "教务本地登录未通过（学校可能已关闭本地登录，或教务密码不正确）。统一认证入口暂时不可用（学校 /sso 路由抖动，可能没拿到 route Cookie）。请稍后重试，或用登录页的「Cookie 登录 / 内嵌浏览器自动获取」完成登录。"
       }
     }
   },
