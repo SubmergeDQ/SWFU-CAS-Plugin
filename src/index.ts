@@ -11,13 +11,13 @@ import type {AcademicPlugin, AuthState, Calendar, ErrorCode, HostSdk, HttpRespon
 //   GET  /cas/getKaptchaStatus    → true 时需图片验证码，图片地址 /cas/kaptcha
 //   POST /cas/login?service=…     → 密码 = 倒序密码 + 教科书式 RSA（16 位小端分块，无 PKCS#1 填充）
 // 登录成功后 CAS 回跳教务 /sso/zfiotlogin?ticket=… 建立教务会话，再核验学号与姓名。
+// 2026-11-16：学校关闭教务本地密码通道，插件改为只走统一认证，并对 /sso 路由节点做 10 次重试。
 //
 // 学期、课表、成绩、考试、选课由内置新正方协议（extends: builtin.zf）继续提供。
 
 const academic = 'https://jw.swfu.edu.cn';
 const cas = 'https://cas.swfu.edu.cn/cas';
 const entry = academic + '/sso/zfiotlogin';
-const localEntry = academic + '/jwglxt/xtgl/login_slogin.html';
 const profile = academic + '/jwglxt/xtgl/index_cxYhxxIndex.html?gnmkdm=index';
 const completion = academic + '/jwglxt/xtgl/index_initMenu.html';
 const service = academic + '/sso/zfiotlogin';
@@ -272,60 +272,42 @@ async function submit(s: HostSdk, pending: Pending, retried = false): Promise<Re
 }
 
 
-// 学校前端已把教务登录强制 302 到统一认证，但后端本地账号密码接口仍然可用（2026-11-16 实测）。
-// 本地登录走 IPv4 的教务域名，1 次请求即可完成；统一认证入口在部分网络下会因 IPv6 不可达卡 20 秒超时。
-type LocalAttempt =
-  | {state: 'ok'; result: Result<AuthState>}
-  | {state: 'rejected'}
-  | {state: 'unavailable'}
-  | {state: 'network'};
+// 2026-11-16 08:00 实测：学校已关闭教务本地密码通道，POST /jwglxt/xtgl/login_slogin.html
+// 一律 302 到统一认证；登录只能走正方定制 CAS。
+//
+// 学校前置负载均衡按 `route` Cookie 把会话粘在某个后端节点上，而只有部分节点部署了
+// /sso/zfiotlogin 桥接（其余返回 404 空响应）。404 响应不会写 route Cookie，所以在
+// 「Cookie 还空着」时反复请求 /sso/zfiotlogin 会重新随机落点，直到落在带 /sso 的节点。
+// 反过来，先访问 /jwglxt/... 就会先写死 route Cookie；若那个节点没有 /sso，之后怎么重试
+// 都是 404。因此入口必须是本次登录的第一个请求，且绝不能先碰 /jwglxt。
 
-// 学校前端已把教务登录强制 302 到统一认证，但后端本地账号密码接口仍然可用（2026-11-16 实测）。
-// 本地登录走 IPv4 的教务域名，1 次请求即可完成；统一认证入口在部分网络下会因 IPv6 不可达卡 20 秒超时。
-async function localLogin(s: HostSdk, account: string, password: string): Promise<LocalAttempt> {
-  let response: HttpResponse;
-  try {
-    response = await s.http({
-      url: localEntry,
-      method: 'POST',
-      purpose: 'auth',
-      form: {yhm: account, mm: password, language: 'zh_CN'},
-    });
-  } catch {
-    return {state: 'network'};
-  }
-  if (response.status >= 500) return {state: 'network'};
-  if (isAcademicPage(response.url)) return {state: 'ok', result: await validate(s)};
-  const body = response.body || '';
-  if (/用户名或密码不正确|密码错误|账号或密码不正确/.test(body)) return {state: 'rejected'};
-  // 302 到 SSO、404、或只剩本地表单：说明本地通道不可用，交给统一认证。
-  return {state: 'unavailable'};
-}
+const entryAttempts = 10;
 
-/** 学校滚动发布时 /sso/zfiotlogin 在首次无 route Cookie 请求时可能 404；最多重试 3 轮入口。 */
+/** 先拿统一认证入口：/sso 落在没有桥接的节点时返回 404，空 Cookie 下重试会重新随机落点。 */
 async function openUnifiedLogin(s: HostSdk): Promise<HttpResponse> {
-  const candidates = [localEntry, entry];
   let lastError: Error | undefined;
-  for (let attempt = 0; attempt < 3; attempt++) {
-    for (const url of candidates) {
-      let page: HttpResponse;
-      try {
-        page = await authGet(s, url);
-      } catch (error) {
-        lastError = error as Error;
-        continue;
-      }
-      if (isAcademicPage(page.url)) return page;
-      if (isCasUrl(page.url)) return page;
-      lastError = Object.assign(new Error('学校统一认证入口发生变化'), {code: 'PAGE_CHANGED' as ErrorCode});
+  for (let attempt = 0; attempt < entryAttempts; attempt++) {
+    let page: HttpResponse;
+    try {
+      page = await authGet(s, entry);
+    } catch (error) {
+      lastError = error as Error;
+      continue;
     }
+    if (isAcademicPage(page.url)) return page;
+    if (isCasUrl(page.url)) return page;
+    if (page.status === 404) {
+      lastError = Object.assign(new Error('学校统一认证入口暂时不可用'), {code: 'ENTRY_UNAVAILABLE' as ErrorCode});
+      continue;
+    }
+    lastError = Object.assign(new Error('学校统一认证入口发生变化'), {code: 'PAGE_CHANGED' as ErrorCode});
   }
   throw lastError ?? Object.assign(new Error('学校统一认证入口发生变化'), {code: 'PAGE_CHANGED' as ErrorCode});
 }
 
-function codeOf(error: unknown): ErrorCode {
+function codeOf(error: unknown): string {
   const code = (error as {code?: unknown})?.code;
-  return typeof code === 'string' ? code as ErrorCode : 'PAGE_CHANGED';
+  return typeof code === 'string' ? code : 'PAGE_CHANGED';
 }
 
 async function casLogin(s: HostSdk, account: string, password: string): Promise<Result<AuthState>> {
@@ -361,40 +343,34 @@ async function casLogin(s: HostSdk, account: string, password: string): Promise<
   return submit(s, pending);
 }
 
-function localHint(state: LocalAttempt['state']): string {
-  if (state === 'rejected') return '教务本地登录未通过（学校可能已关闭本地登录，或教务密码不正确）。';
-  if (state === 'network') return '教务本地登录网络异常。';
-  return '教务本地登录通道不可用（学校入口调整或网络异常）。';
-}
-
 async function start(s: HostSdk, username: string, password: string): Promise<Result<AuthState>> {
   await s.state.remove('pending');
   const account = (username || '').trim();
   if (!account) fail('INVALID_CREDENTIALS', '请输入学号');
   if (!password) fail('INVALID_CREDENTIALS', '请输入密码');
   await s.state.set('account', account);
-  // 1) 先尝试教务本地密码直登（IPv4、单请求，避开统一认证的 IPv6 连接超时与 /sso 抖动）
-  const local = await localLogin(s, account, password);
-  if (local.state === 'ok') return local.result;
-  // 2) 本地失败后回退统一身份认证（CAS），入口最多重试 3 轮以拿到 route Cookie
+  // 学校已关闭教务本地密码通道（2026-11-16），只能走统一身份认证；入口重试 10 次以躲开没有 /sso 的节点。
   try {
     return await casLogin(s, account, password);
   } catch (error) {
     const code = codeOf(error);
-    if (code === 'WEB_LOGIN_REQUIRED') throw error; // 423 等保留原始提示
+    if (code === 'WEB_LOGIN_REQUIRED') throw error; // 423 风控锁定等保留原始提示
+    if (code === 'ENTRY_UNAVAILABLE') {
+      // 入口 10 次都落在没有 /sso 的节点（或学校正在更新）：给人工通道
+      fail('WEB_LOGIN_REQUIRED',
+        '学校统一认证入口暂时连不上（教务系统 /sso 路由节点异常，可能正在更新维护）。已自动重试 ' + entryAttempts +
+        ' 次。请稍后再试，或用登录页的「Cookie 登录 / 内嵌浏览器自动获取」完成登录。');
+    }
     if (code === 'INVALID_CREDENTIALS') {
       fail('INVALID_CREDENTIALS',
-        localHint(local.state) +
-        '统一认证（CAS）也未接受该密码。教务密码与统一认证密码可能不同：如果你刚填的是教务密码，请改用统一认证密码重试；如果填的是统一认证密码，请检查学号和密码是否输错。');
+        '统一身份认证（CAS）未接受这个学号或密码。注意：西南林业大学教务助手现在需要填写「统一身份认证密码」，不是旧的教务系统密码；请确认学号无误、密码是该学号的统一认证密码后重试。');
     }
     if (code === 'NETWORK_RETRYABLE' || code === 'TIMEOUT') {
       fail('NETWORK_RETRYABLE',
-        localHint(local.state) +
-        '统一认证请求超时或网络异常（学校 CAS 的 IPv6 可能不可达）。请换网络后重试，或用登录页的「Cookie 登录 / 内嵌浏览器自动获取」完成登录。');
+        '统一认证请求超时或网络异常（学校 CAS 的 IPv6 可能不可达）。请换网络（如切到流量/Wi-Fi）后重试，或用登录页的「Cookie 登录 / 内嵌浏览器自动获取」。');
     }
     fail('WEB_LOGIN_REQUIRED',
-      localHint(local.state) +
-      '统一认证入口暂时不可用（学校 /sso 路由抖动，可能没拿到 route Cookie）。请稍后重试，或用登录页的「Cookie 登录 / 内嵌浏览器自动获取」完成登录。');
+      '学校统一认证入口发生变化或暂时不可用。请稍后重试，或用登录页的「Cookie 登录 / 内嵌浏览器自动获取」完成登录。');
   }
 }
 

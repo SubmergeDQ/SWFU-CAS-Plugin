@@ -1,92 +1,12 @@
 [
   {
-    "name": "教务密码本地直登成功（IPv4，单请求）",
-    "operation": "auth.start",
-    "args": {
-      "username": "fictional-student",
-      "password": "fictional-local-password"
-    },
-    "http": [
-      {
-        "url": "https://jw.swfu.edu.cn/jwglxt/xtgl/login_slogin.html",
-        "purpose": "auth",
-        "method": "POST",
-        "response": {
-          "status": 200,
-          "url": "https://jw.swfu.edu.cn/jwglxt/xtgl/index_initMenu.html",
-          "body": "<html>ok</html>",
-          "headers": {
-            "content-type": "text/html"
-          }
-        }
-      },
-      {
-        "url": "https://jw.swfu.edu.cn/jwglxt/xtgl/index_cxYhxxIndex.html?gnmkdm=index",
-        "purpose": "query",
-        "response": {
-          "status": 200,
-          "url": "https://jw.swfu.edu.cn/jwglxt/xtgl/index_cxYhxxIndex.html?gnmkdm=index",
-          "body": "<html><body><div class=\"index_grxx\"><div class=\"media\"><div class=\"media-body\"><h4 class=\"media-heading\">模拟同学&nbsp;&nbsp;学生</h4></div></div></div></body></html>",
-          "headers": {
-            "content-type": "text/html;charset=UTF-8"
-          }
-        }
-      },
-      {
-        "url": "https://jw.swfu.edu.cn/jwglxt/xtgl/index_initMenu.html",
-        "purpose": "query",
-        "response": {
-          "status": 200,
-          "url": "https://jw.swfu.edu.cn/jwglxt/xtgl/index_initMenu.html",
-          "body": "<html><body><form id=\"requestMap\" style=\"display:none;\"><input type=\"hidden\" id=\"sessionUserKey\" value=\"fictional-student\" /></form></body></html>",
-          "headers": {
-            "content-type": "text/html;charset=UTF-8"
-          }
-        }
-      }
-    ],
-    "expect": {
-      "ok": true,
-      "data": {
-        "status": "authenticated",
-        "studentId": "fictional-student",
-        "studentName": "模拟同学"
-      }
-    }
-  },
-  {
-    "name": "教务本地密码被拒后回退统一认证（/sso 404 自动重试）",
+    "name": "统一认证直登成功（入口首次 404 后重试成功）",
     "operation": "auth.start",
     "args": {
       "username": "fictional-student",
       "password": "fictional-cas-password"
     },
     "http": [
-      {
-        "url": "https://jw.swfu.edu.cn/jwglxt/xtgl/login_slogin.html",
-        "purpose": "auth",
-        "method": "POST",
-        "response": {
-          "status": 200,
-          "url": "https://jw.swfu.edu.cn/jwglxt/xtgl/login_slogin.html",
-          "body": "<html><body><span class=\"bottom-error-text\">用户名或密码不正确，请重新输入！</span></body></html>",
-          "headers": {
-            "content-type": "text/html"
-          }
-        }
-      },
-      {
-        "url": "https://jw.swfu.edu.cn/jwglxt/xtgl/login_slogin.html",
-        "purpose": "auth",
-        "response": {
-          "status": 404,
-          "url": "https://jw.swfu.edu.cn/jwglxt/xtgl/login_slogin.html",
-          "body": "",
-          "headers": {
-            "content-type": "text/html"
-          }
-        }
-      },
       {
         "url": "https://jw.swfu.edu.cn/sso/zfiotlogin",
         "purpose": "auth",
@@ -95,18 +15,6 @@
           "url": "https://jw.swfu.edu.cn/sso/zfiotlogin",
           "body": "",
           "headers": {}
-        }
-      },
-      {
-        "url": "https://jw.swfu.edu.cn/jwglxt/xtgl/login_slogin.html",
-        "purpose": "auth",
-        "response": {
-          "status": 404,
-          "url": "https://jw.swfu.edu.cn/jwglxt/xtgl/login_slogin.html",
-          "body": "",
-          "headers": {
-            "content-type": "text/html"
-          }
         }
       },
       {
@@ -194,7 +102,7 @@
     }
   },
   {
-    "name": "回退统一认证后要求图片验证码",
+    "name": "统一认证入口连续 404 时自动重试（第 3 次落在带 /sso 的节点）",
     "operation": "auth.start",
     "args": {
       "username": "fictional-student",
@@ -202,30 +110,117 @@
     },
     "http": [
       {
-        "url": "https://jw.swfu.edu.cn/jwglxt/xtgl/login_slogin.html",
+        "url": "https://jw.swfu.edu.cn/sso/zfiotlogin",
+        "purpose": "auth",
+        "response": {
+          "status": 404,
+          "url": "https://jw.swfu.edu.cn/sso/zfiotlogin",
+          "body": "",
+          "headers": {}
+        }
+      },
+      {
+        "url": "https://jw.swfu.edu.cn/sso/zfiotlogin",
+        "purpose": "auth",
+        "response": {
+          "status": 404,
+          "url": "https://jw.swfu.edu.cn/sso/zfiotlogin",
+          "body": "",
+          "headers": {}
+        }
+      },
+      {
+        "url": "https://jw.swfu.edu.cn/sso/zfiotlogin",
+        "purpose": "auth",
+        "response": {
+          "status": 200,
+          "url": "https://cas.swfu.edu.cn/cas/login?service=https%3A%2F%2Fjw.swfu.edu.cn%2Fsso%2Fzfiotlogin",
+          "body": "<html><body><form id=\"fm1\" action=\"login\" method=\"post\"><input type=\"hidden\" name=\"execution\" value=\"synthetic-execution\"/><input type=\"hidden\" name=\"_eventId\" value=\"submit\"/><input type=\"hidden\" name=\"type\" value=\"zhmm\"/><input type=\"text\" name=\"username\" value=\"\"/><input type=\"password\" name=\"password\" value=\"\"/><input type=\"text\" name=\"authcode\" value=\"\"/><input type=\"checkbox\" name=\"rememberMe\"/></form></body></html>",
+          "headers": {
+            "content-type": "text/html;charset=UTF-8"
+          }
+        }
+      },
+      {
+        "url": "https://cas.swfu.edu.cn/cas/v1/getPubKey",
         "purpose": "auth",
         "method": "POST",
         "response": {
           "status": 200,
-          "url": "https://jw.swfu.edu.cn/jwglxt/xtgl/login_slogin.html",
-          "body": "<html><body><span class=\"bottom-error-text\">用户名或密码不正确，请重新输入！</span></body></html>",
+          "url": "https://cas.swfu.edu.cn/cas/v1/getPubKey",
+          "body": "{\"modulus\": \"accc3fc1626e53a13043b026c48bbf33feff9243a8f506b40928b5b7a767c76fb008f86bebb2737f6a6f0fb23c6f5da2cec255404e4fb440034d6608697a8d41\", \"exponent\": \"10001\"}",
+          "headers": {
+            "content-type": "application/json"
+          }
+        }
+      },
+      {
+        "url": "https://cas.swfu.edu.cn/cas/getKaptchaStatus",
+        "purpose": "auth",
+        "response": {
+          "status": 200,
+          "url": "https://cas.swfu.edu.cn/cas/getKaptchaStatus",
+          "body": "false",
+          "headers": {
+            "content-type": "text/plain"
+          }
+        }
+      },
+      {
+        "url": "https://cas.swfu.edu.cn/cas/login?service=https%3A%2F%2Fjw.swfu.edu.cn%2Fsso%2Fzfiotlogin",
+        "purpose": "auth",
+        "method": "POST",
+        "response": {
+          "status": 200,
+          "url": "https://jw.swfu.edu.cn/jwglxt/xtgl/index_initMenu.html?jsdm=xs&_t=1",
+          "body": "<html>首页</html>",
           "headers": {
             "content-type": "text/html"
           }
         }
       },
       {
-        "url": "https://jw.swfu.edu.cn/jwglxt/xtgl/login_slogin.html",
-        "purpose": "auth",
+        "url": "https://jw.swfu.edu.cn/jwglxt/xtgl/index_cxYhxxIndex.html?gnmkdm=index",
+        "purpose": "query",
         "response": {
-          "status": 404,
-          "url": "https://jw.swfu.edu.cn/jwglxt/xtgl/login_slogin.html",
-          "body": "",
+          "status": 200,
+          "url": "https://jw.swfu.edu.cn/jwglxt/xtgl/index_cxYhxxIndex.html?gnmkdm=index",
+          "body": "<html><body><div class=\"index_grxx\"><div class=\"media\"><div class=\"media-body\"><h4 class=\"media-heading\">模拟同学&nbsp;&nbsp;学生</h4></div></div></div></body></html>",
           "headers": {
-            "content-type": "text/html"
+            "content-type": "text/html;charset=UTF-8"
           }
         }
       },
+      {
+        "url": "https://jw.swfu.edu.cn/jwglxt/xtgl/index_initMenu.html",
+        "purpose": "query",
+        "response": {
+          "status": 200,
+          "url": "https://jw.swfu.edu.cn/jwglxt/xtgl/index_initMenu.html",
+          "body": "<html><body><form id=\"requestMap\" style=\"display:none;\"><input type=\"hidden\" id=\"sessionUserKey\" value=\"fictional-student\" /></form></body></html>",
+          "headers": {
+            "content-type": "text/html;charset=UTF-8"
+          }
+        }
+      }
+    ],
+    "expect": {
+      "ok": true,
+      "data": {
+        "status": "authenticated",
+        "studentId": "fictional-student",
+        "studentName": "模拟同学"
+      }
+    }
+  },
+  {
+    "name": "统一认证要求图片验证码",
+    "operation": "auth.start",
+    "args": {
+      "username": "fictional-student",
+      "password": "fictional-cas-password"
+    },
+    "http": [
       {
         "url": "https://jw.swfu.edu.cn/sso/zfiotlogin",
         "purpose": "auth",
@@ -379,38 +374,13 @@
     }
   },
   {
-    "name": "二次认证时交接学校网页登录",
+    "name": "统一认证二次认证时交接学校网页登录",
     "operation": "auth.start",
     "args": {
       "username": "fictional-student",
       "password": "fictional-cas-password"
     },
     "http": [
-      {
-        "url": "https://jw.swfu.edu.cn/jwglxt/xtgl/login_slogin.html",
-        "purpose": "auth",
-        "method": "POST",
-        "response": {
-          "status": 200,
-          "url": "https://jw.swfu.edu.cn/jwglxt/xtgl/login_slogin.html",
-          "body": "<html><body><span class=\"bottom-error-text\">用户名或密码不正确，请重新输入！</span></body></html>",
-          "headers": {
-            "content-type": "text/html"
-          }
-        }
-      },
-      {
-        "url": "https://jw.swfu.edu.cn/jwglxt/xtgl/login_slogin.html",
-        "purpose": "auth",
-        "response": {
-          "status": 404,
-          "url": "https://jw.swfu.edu.cn/jwglxt/xtgl/login_slogin.html",
-          "body": "",
-          "headers": {
-            "content-type": "text/html"
-          }
-        }
-      },
       {
         "url": "https://jw.swfu.edu.cn/sso/zfiotlogin",
         "purpose": "auth",
@@ -517,38 +487,13 @@
     }
   },
   {
-    "name": "统一认证账号或密码错误",
+    "name": "统一认证账号或密码错误（提示需要统一认证密码）",
     "operation": "auth.start",
     "args": {
       "username": "fictional-student",
       "password": "WrongPassword"
     },
     "http": [
-      {
-        "url": "https://jw.swfu.edu.cn/jwglxt/xtgl/login_slogin.html",
-        "purpose": "auth",
-        "method": "POST",
-        "response": {
-          "status": 200,
-          "url": "https://jw.swfu.edu.cn/jwglxt/xtgl/login_slogin.html",
-          "body": "<html><body><span class=\"bottom-error-text\">用户名或密码不正确，请重新输入！</span></body></html>",
-          "headers": {
-            "content-type": "text/html"
-          }
-        }
-      },
-      {
-        "url": "https://jw.swfu.edu.cn/jwglxt/xtgl/login_slogin.html",
-        "purpose": "auth",
-        "response": {
-          "status": 404,
-          "url": "https://jw.swfu.edu.cn/jwglxt/xtgl/login_slogin.html",
-          "body": "",
-          "headers": {
-            "content-type": "text/html"
-          }
-        }
-      },
       {
         "url": "https://jw.swfu.edu.cn/sso/zfiotlogin",
         "purpose": "auth",
@@ -604,12 +549,12 @@
       "ok": false,
       "error": {
         "code": "INVALID_CREDENTIALS",
-        "message": "教务本地登录未通过（学校可能已关闭本地登录，或教务密码不正确）。统一认证（CAS）也未接受该密码。教务密码与统一认证密码可能不同：如果你刚填的是教务密码，请改用统一认证密码重试；如果填的是统一认证密码，请检查学号和密码是否输错。"
+        "message": "统一身份认证（CAS）未接受这个学号或密码。注意：西南林业大学教务助手现在需要填写「统一身份认证密码」，不是旧的教务系统密码；请确认学号无误、密码是该学号的统一认证密码后重试。"
       }
     }
   },
   {
-    "name": "本地被拒且统一认证入口 3 轮均 404：提示稍后重试或网页登录",
+    "name": "统一认证入口 10 次均落在无 /sso 的节点：提示稍后重试或网页登录",
     "operation": "auth.start",
     "args": {
       "username": "fictional-student",
@@ -617,28 +562,13 @@
     },
     "http": [
       {
-        "url": "https://jw.swfu.edu.cn/jwglxt/xtgl/login_slogin.html",
-        "purpose": "auth",
-        "method": "POST",
-        "response": {
-          "status": 200,
-          "url": "https://jw.swfu.edu.cn/jwglxt/xtgl/login_slogin.html",
-          "body": "<html><body><span class=\"bottom-error-text\">用户名或密码不正确，请重新输入！</span></body></html>",
-          "headers": {
-            "content-type": "text/html"
-          }
-        }
-      },
-      {
-        "url": "https://jw.swfu.edu.cn/jwglxt/xtgl/login_slogin.html",
+        "url": "https://jw.swfu.edu.cn/sso/zfiotlogin",
         "purpose": "auth",
         "response": {
           "status": 404,
           "url": "https://jw.swfu.edu.cn/sso/zfiotlogin",
           "body": "",
-          "headers": {
-            "content-type": "text/html"
-          }
+          "headers": {}
         }
       },
       {
@@ -652,15 +582,13 @@
         }
       },
       {
-        "url": "https://jw.swfu.edu.cn/jwglxt/xtgl/login_slogin.html",
+        "url": "https://jw.swfu.edu.cn/sso/zfiotlogin",
         "purpose": "auth",
         "response": {
           "status": 404,
           "url": "https://jw.swfu.edu.cn/sso/zfiotlogin",
           "body": "",
-          "headers": {
-            "content-type": "text/html"
-          }
+          "headers": {}
         }
       },
       {
@@ -674,15 +602,53 @@
         }
       },
       {
-        "url": "https://jw.swfu.edu.cn/jwglxt/xtgl/login_slogin.html",
+        "url": "https://jw.swfu.edu.cn/sso/zfiotlogin",
         "purpose": "auth",
         "response": {
           "status": 404,
           "url": "https://jw.swfu.edu.cn/sso/zfiotlogin",
           "body": "",
-          "headers": {
-            "content-type": "text/html"
-          }
+          "headers": {}
+        }
+      },
+      {
+        "url": "https://jw.swfu.edu.cn/sso/zfiotlogin",
+        "purpose": "auth",
+        "response": {
+          "status": 404,
+          "url": "https://jw.swfu.edu.cn/sso/zfiotlogin",
+          "body": "",
+          "headers": {}
+        }
+      },
+      {
+        "url": "https://jw.swfu.edu.cn/sso/zfiotlogin",
+        "purpose": "auth",
+        "response": {
+          "status": 404,
+          "url": "https://jw.swfu.edu.cn/sso/zfiotlogin",
+          "body": "",
+          "headers": {}
+        }
+      },
+      {
+        "url": "https://jw.swfu.edu.cn/sso/zfiotlogin",
+        "purpose": "auth",
+        "response": {
+          "status": 404,
+          "url": "https://jw.swfu.edu.cn/sso/zfiotlogin",
+          "body": "",
+          "headers": {}
+        }
+      },
+      {
+        "url": "https://jw.swfu.edu.cn/sso/zfiotlogin",
+        "purpose": "auth",
+        "response": {
+          "status": 404,
+          "url": "https://jw.swfu.edu.cn/sso/zfiotlogin",
+          "body": "",
+          "headers": {}
         }
       },
       {
@@ -700,7 +666,7 @@
       "ok": false,
       "error": {
         "code": "WEB_LOGIN_REQUIRED",
-        "message": "教务本地登录未通过（学校可能已关闭本地登录，或教务密码不正确）。统一认证入口暂时不可用（学校 /sso 路由抖动，可能没拿到 route Cookie）。请稍后重试，或用登录页的「Cookie 登录 / 内嵌浏览器自动获取」完成登录。"
+        "message": "学校统一认证入口暂时连不上（教务系统 /sso 路由节点异常，可能正在更新维护）。已自动重试 10 次。请稍后再试，或用登录页的「Cookie 登录 / 内嵌浏览器自动获取」完成登录。"
       }
     }
   },
@@ -712,31 +678,6 @@
       "password": "fictional-cas-password"
     },
     "http": [
-      {
-        "url": "https://jw.swfu.edu.cn/jwglxt/xtgl/login_slogin.html",
-        "purpose": "auth",
-        "method": "POST",
-        "response": {
-          "status": 200,
-          "url": "https://jw.swfu.edu.cn/jwglxt/xtgl/login_slogin.html",
-          "body": "<html><body><span class=\"bottom-error-text\">用户名或密码不正确，请重新输入！</span></body></html>",
-          "headers": {
-            "content-type": "text/html"
-          }
-        }
-      },
-      {
-        "url": "https://jw.swfu.edu.cn/jwglxt/xtgl/login_slogin.html",
-        "purpose": "auth",
-        "response": {
-          "status": 404,
-          "url": "https://jw.swfu.edu.cn/jwglxt/xtgl/login_slogin.html",
-          "body": "",
-          "headers": {
-            "content-type": "text/html"
-          }
-        }
-      },
       {
         "url": "https://jw.swfu.edu.cn/sso/zfiotlogin",
         "purpose": "auth",
@@ -804,31 +745,6 @@
       "password": "fictional-cas-password"
     },
     "http": [
-      {
-        "url": "https://jw.swfu.edu.cn/jwglxt/xtgl/login_slogin.html",
-        "purpose": "auth",
-        "method": "POST",
-        "response": {
-          "status": 200,
-          "url": "https://jw.swfu.edu.cn/jwglxt/xtgl/login_slogin.html",
-          "body": "<html><body><span class=\"bottom-error-text\">用户名或密码不正确，请重新输入！</span></body></html>",
-          "headers": {
-            "content-type": "text/html"
-          }
-        }
-      },
-      {
-        "url": "https://jw.swfu.edu.cn/jwglxt/xtgl/login_slogin.html",
-        "purpose": "auth",
-        "response": {
-          "status": 404,
-          "url": "https://jw.swfu.edu.cn/jwglxt/xtgl/login_slogin.html",
-          "body": "",
-          "headers": {
-            "content-type": "text/html"
-          }
-        }
-      },
       {
         "url": "https://jw.swfu.edu.cn/sso/zfiotlogin",
         "purpose": "auth",
