@@ -155,9 +155,34 @@ async function requestWithRetry<T extends {status: number}>(run: () => Promise<T
   throw lastError instanceof Error ? lastError : new Error('网络连接中断');
 }
 
+/** 宿主选择器偶发解析不到表单时的兜底：直接从 #fm1 片段里取隐藏字段。 */
+function regexCasForm(body: string): Record<string, string> {
+  const form = /<form\b[^>]*id=["']fm1["'][\s\S]*?<\/form>/i.exec(body)?.[0] ?? '';
+  const fields: Record<string, string> = {};
+  for (const match of form.matchAll(/<input\b[^>]*>/gi)) {
+    const tag = match[0];
+    const name = /\bname=["']([^"']+)["']/i.exec(tag)?.[1];
+    if (!name || !/\btype=["']hidden["']/i.test(tag)) continue;
+    fields[name] = /\bvalue=["']([^"']*)["']/i.exec(tag)?.[1] ?? '';
+  }
+  return fields;
+}
+
+/** 页面里是否有可提交的统一认证表单（宿主解析失败时用正则再试一次）。 */
+function executableForm(body: string): boolean {
+  return /name=["']execution["']/i.test(body) && /id=["']fm1["']/i.test(body);
+}
+
+function pageHint(body: string): string {
+  const text = body.replace(/<script[\s\S]*?<\/script>/gi, ' ').replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+  return text.slice(0, 60) || '（空页面）';
+}
+
 function casForm(body: string, s: HostSdk, pending?: Pending): Record<string, string> {
-  const fields = s.html.form(body, '#fm1');
-  if (!fields.execution) fail('PAGE_CHANGED', '学校统一认证表单发生变化');
+  let fields = s.html.form(body, '#fm1');
+  if (!fields.execution) fields = regexCasForm(body);
+  if (!fields.execution) fail('PAGE_CHANGED', '学校统一认证返回的页面里没有登录表单（页面提示：' + pageHint(body) + '）');
   delete fields.rememberMe;
   if (pending) {
     fields.username = pending.account;
@@ -339,7 +364,13 @@ async function openUnifiedLogin(s: HostSdk): Promise<HttpResponse> {
       continue;
     }
     if (isAcademicPage(page.url)) return page;
-    if (isCasUrl(page.url)) return page;
+    if (isCasUrl(page.url)) {
+      // 有些后端节点会返回 200 但内容不是登录表单（维护页 / 半截页面 / 502 页）。这类页面不能提交，
+      // 当作瞬时异常继续重试，避免把「换一个节点就好」的情况误报成表单变更。
+      if (page.status === 200 && executableForm(page.body)) return page;
+      lastError = Object.assign(new Error('学校统一认证返回了异常页面'), {code: 'ENTRY_UNAVAILABLE' as ErrorCode});
+      continue;
+    }
     if (page.status === 404) {
       lastError = Object.assign(new Error('学校统一认证入口暂时不可用'), {code: 'ENTRY_UNAVAILABLE' as ErrorCode});
       continue;
