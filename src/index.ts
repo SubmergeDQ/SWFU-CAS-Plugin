@@ -114,14 +114,38 @@ async function authGet(s: HostSdk, url: string, init: {method?: 'GET' | 'POST'; 
   return response;
 }
 
-// 学校 CAS 域名同时有不可达的 IPv6 地址：OkHttp 首次连机会先撞 IPv6 超时，宿主的地址回退
-// 会在同一个请求内重连 IPv4（实测约 20 秒后恢复），但紧接着的下一个请求偶尔会命中已关闭的
-// 连接而立即失败。这类失败是瞬时的，重试一次即可；业务错误不重试。
-async function requestWithRetry<T>(run: () => Promise<T>, attempts = 2): Promise<T> {
+// 学校 CAS 域名同时有不可达的 IPv6 地址：OkHttp 首次连机会先撞 IPv6 超时（约 20 秒），宿主的地址回退
+// 会在同一个请求内重连 IPv4；但偶尔下一次连接又会撞上 IPv6，或回退后的响应是 502/504。
+// 这些都属于瞬时失败，重试即可恢复；业务错误（验证码/密码/锁定）不重试。
+type LoginStage = 'entry' | 'key' | 'kaptcha' | 'submit' | 'verify';
+const stageText: Record<LoginStage, string> = {
+  entry: '获取统一认证入口',
+  key: '获取登录公钥',
+  kaptcha: '获取验证码状态',
+  submit: '提交登录',
+  verify: '核验教务身份',
+};
+let currentStage: LoginStage = 'entry';
+
+async function inStage<T>(stage: LoginStage, run: () => Promise<T>): Promise<T> {
+  currentStage = stage;
+  try {
+    return await run();
+  } catch (error) {
+    if (error && typeof error === 'object' && !(error as {loginStage?: LoginStage}).loginStage) {
+      Object.assign(error, {loginStage: stage});
+    }
+    throw error;
+  }
+}
+
+async function requestWithRetry<T extends {status: number}>(run: () => Promise<T>, attempts = 3): Promise<T> {
   let lastError: unknown;
   for (let attempt = 0; attempt < attempts; attempt++) {
     try {
-      return await run();
+      const response = await run();
+      if (response.status < 500 || attempt + 1 === attempts) return response;
+      lastError = Object.assign(new Error('学校服务暂时不可用'), {code: 'NETWORK_RETRYABLE'});
     } catch (error) {
       lastError = error;
       const code = (error as {code?: unknown})?.code;
@@ -245,20 +269,23 @@ async function webState(s: HostSdk, pending: Pending): Promise<Result<AuthState>
 
 async function submit(s: HostSdk, pending: Pending, retried = false): Promise<Result<AuthState>> {
   if (!pending.url || !pending.fields) fail('SESSION_EXPIRED', '认证表单已过期，请重新登录');
-  const response = await requestWithRetry(() => s.http({
-    url: pending.url!,
-    method: 'POST',
-    purpose: 'auth',
-    form: pending.fields,
+  const response = await inStage('submit', () => requestWithRetry(async () => {
+    const res = await s.http({
+      url: pending.url!,
+      method: 'POST',
+      purpose: 'auth',
+      form: pending.fields,
+    });
+    if (res.status >= 500) fail('NETWORK_RETRYABLE', '学校统一认证服务暂时不可用');
+    return res;
   }));
-  if (response.status >= 500) fail('NETWORK_RETRYABLE', '学校统一认证服务暂时不可用');
   if (response.status === 423 || response.status === 429) {
     // 学校风控会锁定账号并短信通知「30 分钟后自动解锁」。归类为需要人工验证，
     // 让宿主停止自动续登重试，避免短时间内再次提交登录把锁定续期。
     await s.state.remove('pending');
     fail('WEB_LOGIN_REQUIRED', '学校统一认证提示账号登录异常并被临时锁定，约 30 分钟后自动解锁；请等待后再重新登录，期间不要连续重试');
   }
-  if (isAcademicPage(response.url)) return validate(s);
+  if (isAcademicPage(response.url)) return inStage('verify', () => validate(s));
   const body = response.body || '';
   if (response.status === 401 || response.status === 403 || invalidCredentials(body)) {
     await s.state.remove('pending');
@@ -328,12 +355,12 @@ function codeOf(error: unknown): string {
 }
 
 async function casLogin(s: HostSdk, account: string, password: string): Promise<Result<AuthState>> {
-  const page = await openUnifiedLogin(s);
+  const page = await inStage('entry', () => openUnifiedLogin(s));
   if (page.status !== 200) fail('PAGE_CHANGED', '学校教务登录入口暂不可用');
   if (isAcademicPage(page.url)) return validate(s);
   if (!isCasUrl(page.url)) fail('PAGE_CHANGED', '学校统一认证入口发生变化');
   const fields = casForm(page.body, s);
-  const keyResponse = await requestWithRetry(() => authGet(s, cas + '/v1/getPubKey', {method: 'POST', body: ''}));
+  const keyResponse = await inStage('key', () => requestWithRetry(() => authGet(s, cas + '/v1/getPubKey', {method: 'POST', body: ''})));
   if (keyResponse.status !== 200) fail('PAGE_CHANGED', '学校登录公钥接口发生变化');
   const parsed = ((): {modulus?: unknown; exponent?: unknown} => {
     try {
@@ -355,7 +382,7 @@ async function casLogin(s: HostSdk, account: string, password: string): Promise<
     fields: {...fields, username: account, password: encrypted},
     encryptedPassword: encrypted,
   };
-  const status = await requestWithRetry(() => authGet(s, cas + '/getKaptchaStatus'));
+  const status = await inStage('kaptcha', () => requestWithRetry(() => authGet(s, cas + '/getKaptchaStatus')));
   if (status.status === 200 && status.body.trim() === 'true') return captchaState(s, pending);
   return submit(s, pending);
 }
@@ -371,6 +398,7 @@ async function start(s: HostSdk, username: string, password: string): Promise<Re
     return await casLogin(s, account, password);
   } catch (error) {
     const code = codeOf(error);
+    const stage = (error as {loginStage?: LoginStage}).loginStage ?? currentStage;
     if (code === 'WEB_LOGIN_REQUIRED') throw error; // 423 风控锁定等保留原始提示
     if (code === 'ENTRY_UNAVAILABLE') {
       // 入口 10 次都落在没有 /sso 的节点（或学校正在更新）：给人工通道
@@ -384,10 +412,10 @@ async function start(s: HostSdk, username: string, password: string): Promise<Re
     }
     if (code === 'NETWORK_RETRYABLE' || code === 'TIMEOUT') {
       fail('NETWORK_RETRYABLE',
-        '网络连接中断：学校统一认证域名的 IPv6 地址在本机不可达，首次连接会等约 20 秒才回退 IPv4，期间可能失败。登录没有完成，请再点一次「密码登录」（通常第二次会快很多）；也可以切到另一张网络，或用登录页的「Cookie 登录 / 内嵌浏览器自动获取」。');
+        '登录未完成：' + stageText[stage] + '时网络中断（学校统一认证域名的 IPv6 地址在本机不可达，需要约 20 秒才回退 IPv4，期间容易失败）。请再点一次「密码登录」，已自动重试 ' + 3 + ' 次；若反复失败，可换一张网络，或用登录页的「Cookie 登录 / 内嵌浏览器自动获取」。');
     }
     fail('NETWORK_RETRYABLE',
-      '统一认证过程中连接中断，登录没有完成。请再点一次「密码登录」重试；若反复失败，可切网络，或用登录页的「Cookie 登录 / 内嵌浏览器自动获取」完成登录。');
+      '登录未完成：' + stageText[stage] + '阶段出现网络问题（学校统一认证域名 IPv6 不可达会导致约 20 秒卡顿与偶发断连）。请再点一次「密码登录」；若反复失败，可换网络，或用登录页的「Cookie 登录 / 内嵌浏览器自动获取」。');
   }
 }
 
