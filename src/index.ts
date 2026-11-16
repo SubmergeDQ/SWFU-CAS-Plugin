@@ -114,6 +114,23 @@ async function authGet(s: HostSdk, url: string, init: {method?: 'GET' | 'POST'; 
   return response;
 }
 
+// 学校 CAS 域名同时有不可达的 IPv6 地址：OkHttp 首次连机会先撞 IPv6 超时，宿主的地址回退
+// 会在同一个请求内重连 IPv4（实测约 20 秒后恢复），但紧接着的下一个请求偶尔会命中已关闭的
+// 连接而立即失败。这类失败是瞬时的，重试一次即可；业务错误不重试。
+async function requestWithRetry<T>(run: () => Promise<T>, attempts = 2): Promise<T> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    try {
+      return await run();
+    } catch (error) {
+      lastError = error;
+      const code = (error as {code?: unknown})?.code;
+      if (typeof code === 'string' && code !== 'NETWORK_RETRYABLE') throw error;
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error('网络连接中断');
+}
+
 function casForm(body: string, s: HostSdk, pending?: Pending): Record<string, string> {
   const fields = s.html.form(body, '#fm1');
   if (!fields.execution) fail('PAGE_CHANGED', '学校统一认证表单发生变化');
@@ -203,7 +220,7 @@ async function validate(s: HostSdk): Promise<Result<AuthState>> {
 // ---- 验证码与网页登录交接 ----
 
 async function captchaState(s: HostSdk, pending: Pending): Promise<Result<AuthState>> {
-  const image = await s.http({url: cas + '/kaptcha?time=' + Date.now(), purpose: 'auth', responseType: 'base64'});
+  const image = await requestWithRetry(() => s.http({url: cas + '/kaptcha?time=' + Date.now(), purpose: 'auth', responseType: 'base64'}));
   if (image.status >= 500) fail('NETWORK_RETRYABLE', '学校统一认证服务暂时不可用');
   const mimeType = (image.headers['Content-Type'] ?? image.headers['content-type'] ?? '').split(';')[0].trim();
   if (image.status !== 200 || !image.body || !/^image\//.test(mimeType)) fail('PAGE_CHANGED', '学校未返回验证码图片');
@@ -228,12 +245,12 @@ async function webState(s: HostSdk, pending: Pending): Promise<Result<AuthState>
 
 async function submit(s: HostSdk, pending: Pending, retried = false): Promise<Result<AuthState>> {
   if (!pending.url || !pending.fields) fail('SESSION_EXPIRED', '认证表单已过期，请重新登录');
-  const response = await s.http({
-    url: pending.url,
+  const response = await requestWithRetry(() => s.http({
+    url: pending.url!,
     method: 'POST',
     purpose: 'auth',
     form: pending.fields,
-  });
+  }));
   if (response.status >= 500) fail('NETWORK_RETRYABLE', '学校统一认证服务暂时不可用');
   if (response.status === 423 || response.status === 429) {
     // 学校风控会锁定账号并短信通知「30 分钟后自动解锁」。归类为需要人工验证，
@@ -316,7 +333,7 @@ async function casLogin(s: HostSdk, account: string, password: string): Promise<
   if (isAcademicPage(page.url)) return validate(s);
   if (!isCasUrl(page.url)) fail('PAGE_CHANGED', '学校统一认证入口发生变化');
   const fields = casForm(page.body, s);
-  const keyResponse = await authGet(s, cas + '/v1/getPubKey', {method: 'POST', body: ''});
+  const keyResponse = await requestWithRetry(() => authGet(s, cas + '/v1/getPubKey', {method: 'POST', body: ''}));
   if (keyResponse.status !== 200) fail('PAGE_CHANGED', '学校登录公钥接口发生变化');
   const parsed = ((): {modulus?: unknown; exponent?: unknown} => {
     try {
@@ -338,7 +355,7 @@ async function casLogin(s: HostSdk, account: string, password: string): Promise<
     fields: {...fields, username: account, password: encrypted},
     encryptedPassword: encrypted,
   };
-  const status = await authGet(s, cas + '/getKaptchaStatus');
+  const status = await requestWithRetry(() => authGet(s, cas + '/getKaptchaStatus'));
   if (status.status === 200 && status.body.trim() === 'true') return captchaState(s, pending);
   return submit(s, pending);
 }
@@ -367,10 +384,10 @@ async function start(s: HostSdk, username: string, password: string): Promise<Re
     }
     if (code === 'NETWORK_RETRYABLE' || code === 'TIMEOUT') {
       fail('NETWORK_RETRYABLE',
-        '统一认证请求超时或网络异常（学校 CAS 的 IPv6 可能不可达）。请换网络（如切到流量/Wi-Fi）后重试，或用登录页的「Cookie 登录 / 内嵌浏览器自动获取」。');
+        '网络连接中断：学校统一认证域名的 IPv6 地址在本机不可达，首次连接会等约 20 秒才回退 IPv4，期间可能失败。登录没有完成，请再点一次「密码登录」（通常第二次会快很多）；也可以切到另一张网络，或用登录页的「Cookie 登录 / 内嵌浏览器自动获取」。');
     }
-    fail('WEB_LOGIN_REQUIRED',
-      '学校统一认证入口发生变化或暂时不可用。请稍后重试，或用登录页的「Cookie 登录 / 内嵌浏览器自动获取」完成登录。');
+    fail('NETWORK_RETRYABLE',
+      '统一认证过程中连接中断，登录没有完成。请再点一次「密码登录」重试；若反复失败，可切网络，或用登录页的「Cookie 登录 / 内嵌浏览器自动获取」完成登录。');
   }
 }
 
